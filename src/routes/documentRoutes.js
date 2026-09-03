@@ -1,6 +1,8 @@
 const express = require('express');
 const {
   processDocument,
+  recognizeSnippet,
+  createFromText,
   listDocuments,
   getDocument,
   updateDocument,
@@ -14,6 +16,8 @@ const router = express.Router();
 router.use(protect);
 
 router.post('/process', upload.single('file'), processDocument);
+router.post('/recognize', upload.single('file'), recognizeSnippet);
+router.post('/from-text', createFromText);
 router.get('/', listDocuments);
 router.get('/:id', getDocument);
 router.patch('/:id', updateDocument);

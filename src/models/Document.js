@@ -21,7 +21,7 @@ const documentSchema = new mongoose.Schema(
     },
     fileType: {
       type: String,
-      enum: ['image', 'pdf'],
+      enum: ['image', 'pdf', 'txt', 'docx', 'rtf', 'epub', 'audio'],
       required: true,
     },
     extractedText: {
@@ -32,8 +32,12 @@ const documentSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    isPublic: { type: Boolean, default: false },
+    shareSlug: { type: String, trim: true, sparse: true, unique: true },
   },
-  { timestamps: { createdAt: true, updatedAt: false } }
+  { timestamps: true }
 );
+
+documentSchema.index({ title: 'text', extractedText: 'text' });
 
 module.exports = mongoose.model('Document', documentSchema);

@@ -1,7 +1,11 @@
 const Document = require('../models/Document');
 const Folder = require('../models/Folder');
 const AppError = require('../utils/AppError');
-const { runOcrOnBuffer, inferFileType } = require('../services/ocrService');
+const {
+  runOcrOnBuffer,
+  inferFileType,
+  countWords,
+} = require('../services/ocrService');
 
 async function processDocument(req, res, next) {
   try {
@@ -21,18 +25,23 @@ async function processDocument(req, res, next) {
     });
     if (!folder) throw new AppError('Folder not found', 404);
 
-    const fileType = inferFileType(req.file.mimetype, req.body.fileType);
+    const fileType = inferFileType(
+      req.file.mimetype,
+      req.body.fileType,
+      req.file.originalname
+    );
     if (!fileType) {
-      throw new AppError('Could not determine fileType (image or pdf)', 400);
+      throw new AppError(
+        'Could not determine fileType (image, pdf, txt, docx, rtf, epub)',
+        400
+      );
     }
 
-    // 1. OCR / extract text from in-memory buffer only
     const { extractedText, wordCount } = await runOcrOnBuffer(
       req.file.buffer,
       fileType
     );
 
-    // 2. Persist text only — buffer is discarded when request ends
     const document = await Document.create({
       userId: req.user._id,
       folderId,
@@ -43,6 +52,22 @@ async function processDocument(req, res, next) {
     });
 
     res.status(201).json({ success: true, document });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** OCR a handwriting / image snippet without saving a document */
+async function recognizeSnippet(req, res, next) {
+  try {
+    if (!req.file) {
+      throw new AppError('File is required (field name: file)', 400);
+    }
+    const { extractedText, wordCount } = await runOcrOnBuffer(
+      req.file.buffer,
+      'image'
+    );
+    res.json({ success: true, text: extractedText, wordCount });
   } catch (err) {
     next(err);
   }
@@ -95,6 +120,14 @@ async function updateDocument(req, res, next) {
       if (!folder) throw new AppError('Folder not found', 404);
       updates.folderId = req.body.folderId;
     }
+    if (req.body.extractedText !== undefined) {
+      const extractedText = String(req.body.extractedText);
+      updates.extractedText = extractedText;
+      updates.wordCount =
+        req.body.wordCount !== undefined
+          ? Number(req.body.wordCount)
+          : countWords(extractedText);
+    }
 
     if (!Object.keys(updates).length) {
       throw new AppError('No valid fields to update', 400);
@@ -127,8 +160,44 @@ async function deleteDocument(req, res, next) {
   }
 }
 
+async function createFromText(req, res, next) {
+  try {
+    const { folderId, title, extractedText, fileType } = req.body;
+    if (!folderId) throw new AppError('folderId is required', 400);
+    if (!title || !String(title).trim()) {
+      throw new AppError('title is required', 400);
+    }
+    const text = String(extractedText || '').trim();
+    if (!text) throw new AppError('extractedText is required', 400);
+
+    const folder = await Folder.findOne({
+      _id: folderId,
+      userId: req.user._id,
+    });
+    if (!folder) throw new AppError('Folder not found', 404);
+
+    const allowed = ['txt', 'audio', 'image', 'pdf', 'docx', 'rtf', 'epub'];
+    const ft = allowed.includes(fileType) ? fileType : 'txt';
+
+    const document = await Document.create({
+      userId: req.user._id,
+      folderId,
+      title: String(title).trim(),
+      fileType: ft,
+      extractedText: text,
+      wordCount: countWords(text),
+    });
+
+    res.status(201).json({ success: true, document });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   processDocument,
+  recognizeSnippet,
+  createFromText,
   listDocuments,
   getDocument,
   updateDocument,

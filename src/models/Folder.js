@@ -13,8 +13,10 @@ const folderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    isPublic: { type: Boolean, default: false },
+    shareSlug: { type: String, trim: true, sparse: true, unique: true },
   },
-  { timestamps: { createdAt: true, updatedAt: false } }
+  { timestamps: { createdAt: true, updatedAt: true } }
 );
 
 folderSchema.index({ userId: 1, name: 1 }, { unique: true });
