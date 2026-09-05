@@ -11,6 +11,7 @@ const annotationRoutes = require('./routes/annotationRoutes');
 const flashcardRoutes = require('./routes/flashcardRoutes');
 const classroomRoutes = require('./routes/classroomRoutes');
 const libraryRoutes = require('./routes/libraryRoutes');
+const sharedLibraryRoutes = require('./routes/sharedLibraryRoutes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -33,6 +34,7 @@ app.use('/api/annotations', annotationRoutes);
 app.use('/api/flashcards', flashcardRoutes);
 app.use('/api/classrooms', classroomRoutes);
 app.use('/api/library', libraryRoutes);
+app.use('/api/shared-library', sharedLibraryRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

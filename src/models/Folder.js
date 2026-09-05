@@ -15,6 +15,7 @@ const folderSchema = new mongoose.Schema(
     },
     isPublic: { type: Boolean, default: false },
     shareSlug: { type: String, trim: true, sparse: true, unique: true },
+    driveFolderId: { type: String },
   },
   { timestamps: { createdAt: true, updatedAt: true } }
 );

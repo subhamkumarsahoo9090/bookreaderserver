@@ -14,30 +14,30 @@ const documentSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    title: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    title: { type: String, required: true, trim: true },
     fileType: {
       type: String,
       enum: ['image', 'pdf', 'txt', 'docx', 'rtf', 'epub', 'audio'],
       required: true,
     },
-    extractedText: {
+    language: { type: String, default: 'eng', trim: true },
+    // Prefer Drive; keep Mongo text only as fallback / legacy / short preview
+    extractedText: { type: String, default: '' },
+    textPreview: { type: String, default: '', maxlength: 500 },
+    storage: {
       type: String,
-      required: true,
+      enum: ['mongo', 'drive'],
+      default: 'mongo',
     },
-    wordCount: {
-      type: Number,
-      default: 0,
-    },
+    driveTextFileId: { type: String },
+    driveOriginalFileId: { type: String },
+    wordCount: { type: Number, default: 0 },
     isPublic: { type: Boolean, default: false },
     shareSlug: { type: String, trim: true, sparse: true, unique: true },
   },
   { timestamps: true }
 );
 
-documentSchema.index({ title: 'text', extractedText: 'text' });
+documentSchema.index({ title: 'text', textPreview: 'text' });
 
 module.exports = mongoose.model('Document', documentSchema);

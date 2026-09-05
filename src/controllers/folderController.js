@@ -1,6 +1,8 @@
 const Folder = require('../models/Folder');
 const Document = require('../models/Document');
+const User = require('../models/User');
 const AppError = require('../utils/AppError');
+const driveService = require('../services/driveService');
 
 async function listFolders(req, res, next) {
   try {
@@ -18,9 +20,30 @@ async function createFolder(req, res, next) {
     const name = (req.body.name || '').trim();
     if (!name) throw new AppError('Folder name is required', 400);
 
+    let driveFolderId;
+    try {
+      const user = await User.findById(req.user._id).select('+googleTokens');
+      if (
+        user?.driveConnected &&
+        user.googleTokens?.refreshToken &&
+        driveService.isGoogleConfigured()
+      ) {
+        let rootId = user.driveRootFolderId;
+        if (!rootId) {
+          rootId = await driveService.ensureAksharaRoot(user);
+          user.driveRootFolderId = rootId;
+          await user.save();
+        }
+        driveFolderId = await driveService.createFolder(user, name, rootId);
+      }
+    } catch (e) {
+      console.warn('Drive folder create skipped:', e.message);
+    }
+
     const folder = await Folder.create({
       userId: req.user._id,
       name,
+      driveFolderId,
     });
 
     res.status(201).json({ success: true, folder });

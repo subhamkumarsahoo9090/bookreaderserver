@@ -19,8 +19,45 @@ function countWords(text) {
   return trimmed.split(/\s+/).length;
 }
 
-async function ocrImageWithTesseract(buffer) {
-  const { data } = await Tesseract.recognize(buffer, 'eng', {
+const OCR_LANG_MAP = {
+  auto: 'eng+hin+ori',
+  eng: 'eng',
+  en: 'eng',
+  hin: 'hin',
+  hi: 'hin',
+  ori: 'ori',
+  or: 'ori',
+  odia: 'ori',
+  ben: 'ben',
+  bn: 'ben',
+  tam: 'tam',
+  ta: 'tam',
+  tel: 'tel',
+  te: 'tel',
+  mar: 'mar',
+  mr: 'mar',
+  guj: 'guj',
+  gu: 'guj',
+  kan: 'kan',
+  kn: 'kan',
+  mal: 'mal',
+  ml: 'mal',
+  pan: 'pan',
+  pa: 'pan',
+};
+
+function normalizeOcrLang(ocrLang) {
+  if (!ocrLang || typeof ocrLang !== 'string') return 'eng+hin+ori';
+  const raw = ocrLang.trim().toLowerCase();
+  if (OCR_LANG_MAP[raw]) return OCR_LANG_MAP[raw];
+  // allow explicit tesseract packs like eng+hin+ori
+  if (/^[a-z+]+$/.test(raw)) return raw;
+  return 'eng+hin+ori';
+}
+
+async function ocrImageWithTesseract(buffer, ocrLang) {
+  const lang = normalizeOcrLang(ocrLang);
+  const { data } = await Tesseract.recognize(buffer, lang, {
     logger: () => {},
   });
   return (data && data.text ? data.text : '').trim();
@@ -99,26 +136,35 @@ async function extractFromTxt(buffer) {
 
 /**
  * Run OCR / text extraction entirely on an in-memory buffer.
+ * @param {Buffer} fileBuffer
+ * @param {string} fileType
+ * @param {string} [ocrLang] - eng, hin, ori, auto, or eng+hin+ori etc.
  */
-async function runOcrOnBuffer(fileBuffer, fileType) {
+async function runOcrOnBuffer(fileBuffer, fileType, ocrLang) {
   if (!fileBuffer || !Buffer.isBuffer(fileBuffer)) {
     throw new AppError('Missing file buffer', 400);
   }
 
   const type = (fileType || '').toLowerCase();
+  const lang = normalizeOcrLang(ocrLang);
   let extractedText = '';
 
   if (type === 'pdf') {
     extractedText = await extractFromPdf(fileBuffer);
-    if (!extractedText && process.env.OCR_PROVIDER === 'google') {
-      extractedText = await ocrImageWithGoogle(fileBuffer);
+    if (!extractedText) {
+      const provider = (process.env.OCR_PROVIDER || 'tesseract').toLowerCase();
+      if (provider === 'google') {
+        extractedText = await ocrImageWithGoogle(fileBuffer);
+      } else {
+        extractedText = await ocrImageWithTesseract(fileBuffer, lang);
+      }
     }
   } else if (type === 'image') {
     const provider = (process.env.OCR_PROVIDER || 'tesseract').toLowerCase();
     if (provider === 'google') {
       extractedText = await ocrImageWithGoogle(fileBuffer);
     } else {
-      extractedText = await ocrImageWithTesseract(fileBuffer);
+      extractedText = await ocrImageWithTesseract(fileBuffer, lang);
     }
   } else if (type === 'txt') {
     extractedText = await extractFromTxt(fileBuffer);
@@ -145,6 +191,7 @@ async function runOcrOnBuffer(fileBuffer, fileType) {
   return {
     extractedText,
     wordCount: countWords(extractedText),
+    language: lang,
   };
 }
 
@@ -192,4 +239,6 @@ module.exports = {
   runOcrOnBuffer,
   inferFileType,
   countWords,
+  normalizeOcrLang,
+  OCR_LANG_MAP,
 };
