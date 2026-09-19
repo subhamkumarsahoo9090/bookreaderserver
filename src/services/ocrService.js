@@ -5,6 +5,12 @@ const JSZip = require('jszip');
 const AppError = require('../utils/AppError');
 
 let visionClient = null;
+let sharp = null;
+try {
+  sharp = require('sharp');
+} catch {
+  sharp = null;
+}
 
 function getVisionClient() {
   if (visionClient) return visionClient;
@@ -46,27 +52,186 @@ const OCR_LANG_MAP = {
   pa: 'pan',
 };
 
+const INDIC_LANGS = new Set([
+  'hin',
+  'ori',
+  'ben',
+  'tam',
+  'tel',
+  'mar',
+  'guj',
+  'kan',
+  'mal',
+  'pan',
+]);
+
 function normalizeOcrLang(ocrLang) {
   if (!ocrLang || typeof ocrLang !== 'string') return 'eng+hin+ori';
   const raw = ocrLang.trim().toLowerCase();
   if (OCR_LANG_MAP[raw]) return OCR_LANG_MAP[raw];
-  // allow explicit tesseract packs like eng+hin+ori
   if (/^[a-z+]+$/.test(raw)) return raw;
   return 'eng+hin+ori';
 }
 
+function isIndicLang(lang) {
+  return String(lang || '')
+    .split('+')
+    .some((p) => INDIC_LANGS.has(p));
+}
+
+/**
+ * Upscale / contrast-boost scans so Odia/Hindi glyphs are large enough for Tesseract.
+ */
+async function preprocessImageForOcr(buffer) {
+  if (!sharp) return buffer;
+  try {
+    const img = sharp(buffer, { failOn: 'none' });
+    const meta = await img.metadata();
+    const width = meta.width || 0;
+    const height = meta.height || 0;
+    // Indic scripts need higher resolution; upscale short edges under ~1600px
+    const minSide = Math.min(width || 0, height || 0);
+    const scale = minSide > 0 && minSide < 1600 ? Math.min(3, 1600 / minSide) : 1;
+
+    let pipeline = sharp(buffer, { failOn: 'none' }).rotate(); // honor EXIF
+    if (scale > 1.05) {
+      pipeline = pipeline.resize({
+        width: Math.round(width * scale),
+        height: Math.round(height * scale),
+        fit: 'fill',
+        kernel: sharp.kernel.lanczos3,
+      });
+    }
+
+    return pipeline
+      .grayscale()
+      .normalize()
+      .sharpen({ sigma: 1 })
+      .png()
+      .toBuffer();
+  } catch (err) {
+    console.warn('OCR preprocess skipped:', err.message);
+    return buffer;
+  }
+}
+
+function scoreOcrText(text) {
+  const t = String(text || '').trim();
+  if (!t) return 0;
+  const lines = t.split(/\n+/).filter((l) => l.trim().length > 0).length;
+  // Prefer more characters and more lines (fixes “only last line” cases)
+  return t.length * 2 + lines * 40;
+}
+
+/**
+ * Multi-line Indic pages often fail on default PSM.
+ * Try several page-seg modes and keep the richest result.
+ */
 async function ocrImageWithTesseract(buffer, ocrLang) {
   const lang = normalizeOcrLang(ocrLang);
-  const { data } = await Tesseract.recognize(buffer, lang, {
-    logger: () => {},
-  });
-  return (data && data.text ? data.text : '').trim();
+  const prepared = await preprocessImageForOcr(buffer);
+
+  // For a dedicated Indic language, don't mix eng (it confuses line detection)
+  const primary = lang.includes('+')
+    ? lang
+    : lang;
+
+  // PSM: 6 = uniform block, 4 = single column, 3 = auto, 11 = sparse
+  const modes = isIndicLang(lang)
+    ? [
+        Tesseract.PSM.SINGLE_BLOCK, // 6
+        Tesseract.PSM.SINGLE_COLUMN, // 4
+        Tesseract.PSM.AUTO, // 3
+        Tesseract.PSM.SPARSE_TEXT, // 11
+      ]
+    : [Tesseract.PSM.AUTO, Tesseract.PSM.SINGLE_BLOCK];
+
+  let best = '';
+  let bestScore = -1;
+  let worker;
+
+  try {
+    worker = await Tesseract.createWorker(primary, 1, {
+      logger: () => {},
+    });
+
+    await worker.setParameters({
+      preserve_interword_spaces: '1',
+      user_defined_dpi: '300',
+    });
+
+    for (const psm of modes) {
+      try {
+        await worker.setParameters({
+          tessedit_pageseg_mode: String(psm),
+          preserve_interword_spaces: '1',
+        });
+        const {
+          data: { text },
+        } = await worker.recognize(prepared);
+        const cleaned = String(text || '')
+          .replace(/\u000c/g, '') // form feed
+          .replace(/[ \t]+\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+        const score = scoreOcrText(cleaned);
+        if (score > bestScore) {
+          bestScore = score;
+          best = cleaned;
+        }
+        // Good enough: multiple lines and decent length
+        if (
+          cleaned.split(/\n+/).filter((l) => l.trim()).length >= 3 &&
+          cleaned.length > 40
+        ) {
+          break;
+        }
+      } catch (err) {
+        console.warn('OCR PSM pass failed:', psm, err.message);
+      }
+    }
+
+    // Auto mode: if mixed pack returned almost nothing, retry Oriya-only / Hindi-only
+    if (lang.includes('+') && scoreOcrText(best) < 60) {
+      for (const fallback of ['ori', 'hin', 'eng']) {
+        try {
+          await worker.reinitialize(fallback);
+          await worker.setParameters({
+            tessedit_pageseg_mode: String(Tesseract.PSM.SINGLE_BLOCK),
+            preserve_interword_spaces: '1',
+          });
+          const {
+            data: { text },
+          } = await worker.recognize(prepared);
+          const cleaned = String(text || '').trim();
+          const score = scoreOcrText(cleaned);
+          if (score > bestScore) {
+            bestScore = score;
+            best = cleaned;
+          }
+        } catch (err) {
+          console.warn('OCR fallback lang failed:', fallback, err.message);
+        }
+      }
+    }
+  } finally {
+    if (worker) {
+      try {
+        await worker.terminate();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  return best;
 }
 
 async function ocrImageWithGoogle(buffer) {
   const client = getVisionClient();
+  const prepared = await preprocessImageForOcr(buffer);
   const [result] = await client.documentTextDetection({
-    image: { content: buffer.toString('base64') },
+    image: { content: prepared.toString('base64') },
   });
   const full = result.fullTextAnnotation;
   return (full && full.text ? full.text : '').trim();
@@ -98,7 +263,6 @@ function stripHtml(html) {
 
 function extractFromRtf(buffer) {
   const raw = buffer.toString('utf8');
-  // Lightweight RTF → text: drop control words/groups, keep readable chars
   let text = raw
     .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
     .replace(/\\[a-zA-Z]+-?\d* ?/g, ' ')
@@ -136,9 +300,6 @@ async function extractFromTxt(buffer) {
 
 /**
  * Run OCR / text extraction entirely on an in-memory buffer.
- * @param {Buffer} fileBuffer
- * @param {string} fileType
- * @param {string} [ocrLang] - eng, hin, ori, auto, or eng+hin+ori etc.
  */
 async function runOcrOnBuffer(fileBuffer, fileType, ocrLang) {
   if (!fileBuffer || !Buffer.isBuffer(fileBuffer)) {

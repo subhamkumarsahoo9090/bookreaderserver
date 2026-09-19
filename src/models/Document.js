@@ -38,6 +38,14 @@ const documentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-documentSchema.index({ title: 'text', textPreview: 'text' });
+documentSchema.index(
+  { title: 'text', textPreview: 'text' },
+  {
+    // Avoid colliding with our OCR `language` field (eng / eng+hin+ori).
+    // MongoDB text indexes treat a field named `language` as the stemmer override.
+    default_language: 'none',
+    language_override: 'searchLang',
+  }
+);
 
 module.exports = mongoose.model('Document', documentSchema);

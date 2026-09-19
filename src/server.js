@@ -12,6 +12,17 @@ connectDB()
     } catch (e) {
       console.warn('Admin seed skipped:', e.message);
     }
+    try {
+      const Folder = require('./models/Folder');
+      const Document = require('./models/Document');
+      const SharedBook = require('./models/SharedBook');
+      // Drop legacy indexes that conflict with nested folders / OCR language field
+      await Folder.syncIndexes();
+      await Document.syncIndexes();
+      await SharedBook.syncIndexes();
+    } catch (e) {
+      console.warn('Index sync skipped:', e.message);
+    }
     app.listen(PORT, () => {
       console.log(`Book Reader API listening on port ${PORT}`);
     });

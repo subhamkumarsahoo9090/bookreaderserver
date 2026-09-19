@@ -26,6 +26,12 @@ const sharedBookSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-sharedBookSchema.index({ title: 'text', description: 'text', category: 'text' });
+sharedBookSchema.index(
+  { title: 'text', description: 'text', category: 'text' },
+  {
+    default_language: 'none',
+    language_override: 'searchLang',
+  }
+);
 
 module.exports = mongoose.model('SharedBook', sharedBookSchema);

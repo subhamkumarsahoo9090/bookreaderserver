@@ -32,11 +32,16 @@ function getOAuthClient(redirectUri) {
 
 function getAuthUrl(state = 'login') {
   const client = getOAuthClient();
+  const redirectUri =
+    process.env.GOOGLE_REDIRECT_URI ||
+    'http://localhost:5000/api/auth/google/callback';
   return client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
     scope: SCOPES,
     state,
+    // Explicit so production never silently drifts from env
+    redirect_uri: redirectUri,
   });
 }
 

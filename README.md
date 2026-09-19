@@ -36,8 +36,15 @@ Also promote any emails in `ADMIN_EMAILS` on login/register.
 1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
 2. Enable **Google Drive API** and **Google+ / People API** (userinfo).
 3. Create **OAuth 2.0 Client ID** (Web application).
-4. Authorized redirect URI: `http://localhost:5000/api/auth/google/callback` (or your deployed API URL + `/api/auth/google/callback`).
-5. Set in `.env`:
+4. **Authorized redirect URIs** — add BOTH (exact match, no trailing slash):
+   - Local: `http://localhost:5000/api/auth/google/callback`
+   - Production API: `https://bookreaderserverbysubham.onrender.com/api/auth/google/callback`
+5. **Authorized JavaScript origins** (optional but recommended):
+   - `http://localhost:3000`
+   - Your live frontend origin (e.g. `https://your-app.vercel.app`)
+6. OAuth consent screen → **Testing** → add your Gmail under **Test users** (or Publish app).
+
+#### Local `.env`
 
 ```
 GOOGLE_CLIENT_ID=...
@@ -45,6 +52,25 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://localhost:5000/api/auth/google/callback
 FRONTEND_URL=http://localhost:3000
 ```
+
+#### Production (Render) environment variables
+
+Must differ from localhost — **401 Bad Request** on Google consent usually means redirect URI / client ID mismatch:
+
+```
+GOOGLE_CLIENT_ID=...same as console...
+GOOGLE_CLIENT_SECRET=...same as console...
+GOOGLE_REDIRECT_URI=https://bookreaderserverbysubham.onrender.com/api/auth/google/callback
+FRONTEND_URL=https://YOUR-FRONTEND-DOMAIN
+```
+
+Frontend production:
+
+```
+NEXT_PUBLIC_API_URL=https://bookreaderserverbysubham.onrender.com
+```
+
+After changing Render env → **Manual Deploy** / restart. After changing Google Console URIs → wait ~1 minute, then try again in a private window.
 
 If these are missing, email/password auth and Mongo storage still work; Google buttons show a clear “not configured” message.
 

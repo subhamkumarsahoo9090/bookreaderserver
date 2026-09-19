@@ -8,6 +8,12 @@ const folderSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    parentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Folder',
+      default: null,
+      index: true,
+    },
     name: {
       type: String,
       required: true,
@@ -20,6 +26,7 @@ const folderSchema = new mongoose.Schema(
   { timestamps: { createdAt: true, updatedAt: true } }
 );
 
-folderSchema.index({ userId: 1, name: 1 }, { unique: true });
+// Same name allowed in different parents; unique within a parent
+folderSchema.index({ userId: 1, parentId: 1, name: 1 }, { unique: true });
 
 module.exports = mongoose.model('Folder', folderSchema);
